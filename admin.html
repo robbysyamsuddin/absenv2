@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Admin Madrasah</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8fafc; }</style>
+</head>
+<body class="p-6">
+  <div class="max-w-6xl mx-auto">
+    
+    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-800">Panel Admin E-Absen</h1>
+        <p class="text-slate-500 text-xs">Kelola sistem, CRUD Guru, Kalender Libur, & Cetak PDF</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="tahunAjaran" class="p-2 text-xs border border-slate-200 rounded-xl bg-slate-50 font-bold">
+          <option value="2025/2026">2025/2026</option>
+          <option value="2026/2027" selected>2026/2027</option>
+        </select>
+        <input type="month" id="filterBulan" class="p-2 text-xs border border-slate-200 rounded-xl bg-slate-50 font-bold">
+        <button onclick="eksporKePDF()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md">
+          📊 Download PDF + TTD
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      
+      <div class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+        <h3 class="font-bold text-slate-800 text-sm mb-3">👥 Kelola Data Guru</h3>
+        <div class="flex gap-2 mb-4">
+          <input type="text" id="inputNamaGuru" placeholder="Ketik nama guru baru..." class="w-full p-2 text-xs border border-slate-200 rounded-xl focus:outline-indigo-500">
+          <button onclick="tambahGuru()" class="bg-indigo-600 text-white text-xs px-4 rounded-xl font-bold">+</button>
+        </div>
+        <div class="max-h-[180px] overflow-y-auto divide-y divide-slate-100 mb-4" id="listGuruUI"></div>
+        
+        <div class="pt-4 border-t border-slate-100">
+          <label class="block text-[10px] font-bold text-slate-500 mb-1">UPLOAD FOTO TTD DIGITAL GURU:</label>
+          <select id="selectTTDGuru" class="w-full p-2 text-xs border border-slate-200 rounded-xl mb-2 bg-slate-50"></select>
+          <input type="file" id="fileTTD" accept="image/*" class="w-full text-[10px] text-slate-400 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:bg-slate-100 file:text-slate-700">
+          <button onclick="uploadTTDServer()" id="btnUpload" class="w-full bg-slate-800 text-white text-[11px] font-bold py-2 rounded-xl mt-2">Simpan TTD ke Drive</button>
+        </div>
+      </div>
+
+      <div class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+        <h3 class="font-bold text-slate-800 text-sm mb-3">📅 Kalender Hari Libur Khusus</h3>
+        <div class="space-y-2 mb-4">
+          <input type="date" id="inputTglLibur" class="w-full p-2 text-xs border border-slate-200 rounded-xl">
+          <input type="text" id="inputKetLibur" placeholder="Keterangan libur..." class="w-full p-2 text-xs border border-slate-200 rounded-xl">
+          <button onclick="tambahLibur()" class="w-full bg-emerald-600 text-white text-xs font-bold py-2 rounded-xl">Simpan Hari Libur</button>
+        </div>
+        <div class="max-h-[200px] overflow-y-auto divide-y divide-slate-100" id="listLiburUI"></div>
+      </div>
+
+      <div class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+        <h3 class="font-bold text-slate-700 text-sm mb-3">⏱️ Log Absensi Bulan Ini</h3>
+        <div class="max-h-[380px] overflow-y-auto text-xs space-y-2" id="logAbsenUI"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // ⚠️ MASUKKAN URL GOOGLE SCRIPT WEB APP ANDA DI SINI
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbx0w3eyiP3bRs0HoyZoRbH6Y-aijP33s4yjiFyb0x4pRnZ7EFsm4QsvqgZ07167CdCgiQ/exec";
+
+    let DB_GURU = []; let DB_LIBUR = []; let DB_LOG = [];
+
+    window.onload = function() {
+      const tgl = new Date();
+      document.getElementById('filterBulan').value = tgl.getFullYear() + "-" + String(tgl.getMonth() + 1).padStart(2, '0');
+      muatDataServer();
+    };
+
+    function muatDataServer() {
+      fetch(`${GAS_URL}?action=getAdminData`)
+        .then(res => res.json())
+        .then(res => {
+          if(res.status === "success") {
+            DB_GURU = res.daftarGuru; DB_LIBUR = res.kalenderLibur; DB_LOG = res.logAbsen;
+            renderUI();
+          }
+        });
+    }
+
+    function renderUI() {
+      // 1. Render Guru CRUD
+      const guruUI = document.getElementById('listGuruUI');
+      const selectTTD = document.getElementById('selectTTDGuru');
+      guruUI.innerHTML = ""; selectTTD.innerHTML = "";
+      
+      let optKepala = document.createElement('option'); optKepala.value = "KEPALA_MADRASAH"; optKepala.innerHTML = "Kepala MI (Nur Muchsi, S.Pd)";
+      selectTTD.appendChild(optKepala);
+
+      DB_GURU.forEach(g => {
+        guruUI.innerHTML += `
+          <div class="flex justify-between items-center py-2 text-xs">
+            <span class="font-medium text-slate-800">${g.nama} ${g.ttd ? '📝 (Ada TTD)':''}</span>
+            <button onclick="hapusGuruServer('${g.nama}')" class="text-red-500 font-bold text-[10px]">Hapus</button>
+          </div>`;
+        let opt = document.createElement('option'); opt.value = g.nama; opt.innerHTML = g.nama;
+        selectTTD.appendChild(opt);
+      });
+
+      // 2. Render Libur
+      const liburUI = document.getElementById('listLiburUI'); liburUI.innerHTML = "";
+      DB_LIBUR.forEach(l => {
+        liburUI.innerHTML += `
+          <div class="flex justify-between items-center py-2 text-xs">
+            <div><span class="font-bold">${l.tanggal}</span> - <span class="text-red-500">${l.keterangan}</span></div>
+            <button onclick="hapusLiburServer('${l.tanggal}')" class="text-slate-400 font-bold">X</button>
+          </div>`;
+      });
+
+      // 3. Render Log
+      const logUI = document.getElementById('logAbsenUI'); logUI.innerHTML = "";
+      let bln = document.getElementById('filterBulan').value;
+      let filterLog = DB_LOG.filter(d => d.tanggal.startsWith(bln));
+      
+      if(filterLog.length === 0) { logUI.innerHTML = "<p class='text-slate-400 text-center py-4'>Belum ada data.</p>"; }
+      filterLog.reverse().forEach(l => {
+        logUI.innerHTML += `
+          <div class="p-2 bg-slate-50 rounded-xl border border-slate-100">
+            <div class="font-bold text-slate-800">${l.nama}</div>
+            <div class="text-[10px] text-slate-400">${l.tanggal}</div>
+            <div class="flex gap-2 text-[10px] font-bold mt-0.5">
+              <span class="text-green-600">M: ${l.jamMasuk}</span> | <span class="text-amber-600">P: ${l.jamJamPulang || l.jamPulang}</span>
+            </div>
+          </div>`;
+      });
+    }
+
+    document.getElementById('filterBulan').addEventListener('change', renderUI);
+
+    function kirimPost(dataObj) {
+      return fetch(GAS_URL, { method: "POST", body: JSON.stringify(dataObj) }).then(() => muatDataServer()).catch(() => muatDataServer());
+    }
+
+    function tambahGuru() {
+      let nama = document.getElementById('inputNamaGuru').value.trim(); if(!nama) return;
+      document.getElementById('inputNamaGuru').value = "";
+      kirimPost({ action: "simpanGuru", namaGuru: nama });
+    }
+
+    function hapusGuruServer(nama) { if(confirm(`Hapus ${nama}?`)) kirimPost({ action: "hapusGuru", namaGuru: nama }); }
+
+    function tambahLibur() {
+      let tgl = document.getElementById('inputTglLibur').value; let ket = document.getElementById('inputKetLibur').value.trim();
+      if(!tgl || !ket) return;
+      document.getElementById('inputTglLibur').value = ""; document.getElementById('inputKetLibur').value = "";
+      kirimPost({ action: "simpanLibur", tanggal: tgl, keterangan: ket });
+    }
+
+    function hapusLiburServer(tgl) { kirimPost({ action: "hapusLibur", tanggal: tgl }); }
+
+    function uploadTTDServer() {
+      const nama = document.getElementById('selectTTDGuru').value; const fileIn = document.getElementById('fileTTD');
+      if(fileIn.files.length === 0) return;
+      const file = fileIn.files[0]; const reader = new FileReader();
+      document.getElementById('btnUpload').innerText = "⏳ Menyimpan...";
+
+      reader.onload = function(e) {
+        const base64 = e.target.result.split(',')[1];
+        kirimPost({ action: "uploadTTD", namaGuru: nama, mimeType: file.type, base64Data: base64 }).then(() => {
+          alert("Sukses mengunggah TTD!"); document.getElementById('btnUpload').innerText = "Simpan Gambar TTD"; fileIn.value = "";
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function eksporKePDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
+      let pilihBulan = document.getElementById('filterBulan').value;
+      let ta = document.getElementById('tahunAjaran').value;
+      if(!pilihBulan) return alert("Pilih bulan!");
+
+      let tahun = pilihBulan.split("-")[0]; let bulanNum = parseInt(pilihBulan.split("-")[1]) - 1;
+      const namaBulanIndo = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+      doc.setFont("Helvetica", "bold"); doc.setFontSize(13);
+      doc.text("REKAPITULASI ABSENSI BULANAN GURU / TENAGA KEPENDIDIKAN", 14, 13);
+      doc.setFontSize(10);
+      doc.text(`Bulan : ${namaBulanIndo[bulanNum]} ${tahun} | Tahun Ajaran : ${ta}`, 14, 19);
+
+      let tableHeaders = ["NO", "NAMA GURU"];
+      let jumlahHari = new Date(tahun, bulanNum + 1, 0).getDate();
+      for (let d = 1; d <= 31; d++) { tableHeaders.push(String(d)); }
+      tableHeaders.push("Total", "TTD GURU");
+
+      let tableRows = []; let listLinkTTDGuru = [];
+      DB_GURU.forEach((g, indeks) => {
+        let baris = [String(indeks + 1), g.nama]; let totalHadir = 0;
+        for (let tgl = 1; tgl <= 31; tgl++) {
+          if (tgl > jumlahHari) { baris.push("-"); continue; }
+          let tglStr = `${tahun}-${String(bulanNum + 1).padStart(2, '0')}-${String(tgl).padStart(2, '0')}`;
+          let hariKe = new Date(tahun, bulanNum, tgl).getDay();
+          let liburCustom = DB_LIBUR.find(l => l.tanggal === tglStr);
+          let adaAbsen = DB_LOG.find(log => log.tanggal === tglStr && log.nama === g.nama);
+
+          if (hariKe === 0 || liburCustom) { baris.push("M"); } 
+          else if (adaAbsen && adaAbsen.jamMasuk !== "-") { baris.push("H"); totalHadir++; } 
+          else { baris.push(""); }
+        }
+        baris.push(String(totalHadir), ""); tableRows.push(baris);
+        listLinkTTDGuru.push(g.ttd || null);
+      });
+
+      doc.autoTable({
+        startY: 25, head: [tableHeaders], body: tableRows, theme: 'grid',
+        styles: { fontSize: 6.5, cellPadding: 0.8, alignment: 'center', valign: 'middle' },
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255] },
+        columnStyles: { 1: { halign: 'left', fontStyle: 'bold', width: 40 }, 33: { width: 18 } },
+        didParseCell: function(data) {
+          if (data.cell.text[0] === 'M') { data.cell.styles.textColor = [220, 38, 38]; data.cell.styles.fillColor = [254, 242, 242]; }
+        },
+        didDrawCell: function(data) {
+          if (data.section === 'body' && data.column.index === 33) {
+            let ttdUrl = listLinkTTDGuru[data.row.index];
+            if (ttdUrl) { try { doc.addImage(ttdUrl, 'PNG', data.cell.x + 1, data.cell.y + 0.5, 16, 6); } catch (e) {} }
+          }
+        }
+      });
+
+      let posisiY = doc.lastAutoTable.finalY + 10; let lebarHalaman = doc.internal.pageSize.width;
+      doc.setFont("Helvetica", "normal"); doc.setFontSize(8.5);
+      doc.text("Keterangan: M = Hari Minggu/Libur Nasional | H = Hadir Tugas Scan", 14, posisiY);
+      doc.text("Mengetahui,\nKepala MI Raudlatul Ulum", lebarHalaman - 70, posisiY);
+
+      let ttdLinkKepala = DB_GURU.find(g => g.nama === "KEPALA_MADRASAH")?.ttd;
+      if (ttdLinkKepala) { try { doc.addImage(ttdLinkKepala, 'PNG', lebarHalaman - 72, posisiY + 4, 22, 12); } catch(e){} }
+
+      doc.setFont("Helvetica", "bold");
+      doc.text("NUR MUCHSI, S.Pd", lebarHalaman - 70, posisiY + 22);
+      doc.save(`Rekap_Absen_Bulan_${pilihBulan}.pdf`);
+    }
+  </script>
+</body>
+</html>
